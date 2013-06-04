@@ -176,7 +176,8 @@ trait ScalaSettings extends AbsScalaSettings
   val YvirtClasses    = false // too embryonic to even expose as a -Y //BooleanSetting    ("-Yvirtual-classes", "Support virtual classes")
   val YdisableUnreachablePrevention = BooleanSetting("-Ydisable-unreachable-prevention", "Disable the prevention of unreachable blocks in code generation.")
 
-  val exposeEmptyPackage = BooleanSetting("-Yexpose-empty-package", "Internal only: expose the empty package.").internalOnly()
+
+	val exposeEmptyPackage = BooleanSetting("-Yexpose-empty-package", "Internal only: expose the empty package.").internalOnly()
 
   /** Area-specific debug output.
    */
@@ -208,6 +209,7 @@ trait ScalaSettings extends AbsScalaSettings
                                 "GenASM")
   // Feature extensions
   val XmacroSettings          = MultiStringSetting("-Xmacro-settings", "option", "Custom settings for macros.")
+	val XrichFor                = BooleanSetting("-Xrich-for", "Enable rich for-comprehension syntax")
 
   /**
    * IDE-specific settings
