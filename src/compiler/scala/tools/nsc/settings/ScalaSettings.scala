@@ -178,7 +178,8 @@ trait ScalaSettings extends AbsScalaSettings
   val noSelfCheck     = BooleanSetting    ("-Yno-self-type-checks", "Suppress check for self-type conformance among inherited members.")
   val YvirtClasses    = false // too embryonic to even expose as a -Y //BooleanSetting    ("-Yvirtual-classes", "Support virtual classes")
 
-  val exposeEmptyPackage = BooleanSetting("-Yexpose-empty-package", "Internal only: expose the empty package.").internalOnly()
+
+	val exposeEmptyPackage = BooleanSetting("-Yexpose-empty-package", "Internal only: expose the empty package.").internalOnly()
 
   def stop = stopAfter
 
@@ -207,6 +208,7 @@ trait ScalaSettings extends AbsScalaSettings
 
   // Feature extensions
   val XmacroSettings          = MultiStringSetting("-Xmacro-settings", "option", "Custom settings for macros.")
+	val XrichFor                = BooleanSetting("-Xrich-for", "Enable rich for-comprehension syntax")
 
   /**
    * IDE-specific settings
