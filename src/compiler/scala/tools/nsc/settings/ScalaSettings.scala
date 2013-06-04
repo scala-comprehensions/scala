@@ -183,7 +183,8 @@ trait ScalaSettings extends AbsScalaSettings
   val YdisableUnreachablePrevention = BooleanSetting("-Ydisable-unreachable-prevention", "Disable the prevention of unreachable blocks in code generation.")
   val YnoLoadImplClass = BooleanSetting   ("-Yno-load-impl-class", "Do not load $class.class files.")
 
-  val exposeEmptyPackage = BooleanSetting("-Yexpose-empty-package", "Internal only: expose the empty package.").internalOnly()
+
+	val exposeEmptyPackage = BooleanSetting("-Yexpose-empty-package", "Internal only: expose the empty package.").internalOnly()
 
   private def removalIn212 = "This flag is scheduled for removal in 2.12. If you have a case where you need this flag then please report a bug."
 
@@ -218,6 +219,7 @@ trait ScalaSettings extends AbsScalaSettings
                                 "GenASM")
   // Feature extensions
   val XmacroSettings          = MultiStringSetting("-Xmacro-settings", "option", "Custom settings for macros.")
+	val XrichFor                = BooleanSetting("-Xrich-for", "Enable rich for-comprehension syntax")
 
   /**
    * IDE-specific settings
