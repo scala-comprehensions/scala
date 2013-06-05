@@ -170,11 +170,15 @@ abstract class TreeBuilder {
   }
 
   /** Create tree representing (unencoded) binary operation expression or pattern. */
-  def makeBinop(isExpr: Boolean, left: Tree, op: TermName, right: Tree, opPos: Position): Tree = {
+  def makeBinop(isExpr: Boolean, left: Tree, op: TermName, right: Tree, opPos: Position, wrapInWith: Boolean): Tree = {
     def mkNamed(args: List[Tree]) = if (isExpr) args map treeInfo.assignmentToMaybeNamedArg else args
     val arguments = right match {
-      case Parens(args) => mkNamed(args)
-      case _            => List(right)
+      case Parens(args) =>
+				if (wrapInWith) List(With(stripParens(right)))
+				else mkNamed(args)
+      case _            =>
+				if (wrapInWith) List(With(right))
+				else List(right)
     }
     if (isExpr) {
       if (treeInfo.isLeftAssoc(op)) {
@@ -266,6 +270,13 @@ abstract class TreeBuilder {
   case class ValFrom(pos: Position, pat: Tree, rhs: Tree) extends Enumerator
   case class ValEq(pos: Position, pat: Tree, rhs: Tree) extends Enumerator
   case class Filter(pos: Position, test: Tree) extends Enumerator
+  case class ForTransformer(
+    pos: Position,
+    pattern: Tree,
+    bodyName: Name,
+    op: Tree,
+    rest: List[Enumerator]
+  ) extends Enumerator
 
   /** Create tree for for-comprehension <for (enums) do body> or
   *   <for (enums) yield body> where mapName and flatMapName are chosen
@@ -360,8 +371,85 @@ abstract class TreeBuilder {
       r2p(genpos.startOrPoint, genpos.point, end)
     }
 
+    /* Replace the Ident(`bodyName`) in `target' with `body' */
+    def replaceWithBody(target: Tree, bodyName: Name, body: Tree): Tree = new Transformer {
+      override def transform(t: Tree): Tree = t match {
+        case Apply(Ident(`bodyName`), args) => Apply(body, args)
+        case TypeApply(Ident(`bodyName`), targs) => TypeApply(body, targs)
+        case Select(Ident(`bodyName`), selection) => Select(body, selection)
+        case Ident(`bodyName`) => body
+        case Apply(target, args) => Apply(super.transform(target), args)
+        case TypeApply(target, targs) => TypeApply(super.transform(target), targs)
+        case Select(target, selection) => Select(super.transform(target), selection)
+        case With(body) => With(super.transform(body))
+        case _ => EmptyTree
+      }
+    }.transform(target)
+
+    def boundNames(pattern: Tree): List[TermName] = {
+      val names = new ListBuffer[TermName]()
+      new Traverser {
+        override def traverse(t: Tree): Unit = t match {
+          case b@Bind(name: TermName, _) =>
+            names += name
+            super.traverse(b)
+          case t => super.traverse(t)
+        }
+      }.traverse(pattern)
+      names.toList
+    }
+
+    def makeForTransformer(t: ForTransformer, before: List[Enumerator]): Tree = {
+
+      val ForTransformer(pos, pattern, bodyName, op, rest) = t
+
+      val beforePats = before collect {
+        case ValEq(_, pat, _) => pat
+        case ValFrom(_, pat, _) => pat
+      }
+
+      val hasPattern = pattern != EmptyTree
+      val alreadyBoundNames = (beforePats flatMap boundNames).distinct
+      val generatedBody = makeTupleTerm(alreadyBoundNames.map(Ident.apply), flattenUnary = true)
+      val innerFor = makeForYield(before, generatedBody)
+      val extractingOp = new Transformer {
+        override def transform(t: Tree) = t match {
+          case With(body) => makeClosure(pos, patvarTransformer.transform(generatedBody), body)
+          case t => super.transform(t)
+        }
+      }.transform(op)
+
+      val opped = replaceWithBody(extractingOp, bodyName, innerFor)
+
+			val patternNames = boundNames(patvarTransformer.transform(pattern))
+
+			val rebindings = new Transformer {
+				override def transform(t: Tree) = t match {
+					case Ident(n) if patternNames contains n => Ident(newTermName("_"))
+					case o => super.transform(o)
+				}
+			}.transform(generatedBody)
+
+      val lhs =
+        if (!hasPattern) generatedBody
+        else makeTupleTerm(List(pattern, rebindings), flattenUnary = false)
+
+      val binding = ValFrom(op.pos, patvarTransformer.transform(lhs), opped)
+
+      val rest1 = rest match {
+        case (t: ForTransformer) :: tail => t :: binding :: tail
+        case _ => binding :: rest
+      }
+
+      makeFor(mapName, flatMapName, rest1, body)
+
+    }
+
 //    val result =
     enums match {
+
+      case (t: ForTransformer) :: before =>
+        makeForTransformer(t, before)
       case ValFrom(pos, pat, rhs) :: Nil =>
         makeCombination(closurePos(pos), mapName, rhs, pat, body)
       case ValFrom(pos, pat, rhs) :: (rest @ (ValFrom(_,  _, _) :: _)) =>

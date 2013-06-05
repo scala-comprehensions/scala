@@ -1,0 +1,4 @@
+with-outside-for.scala:3: error: with must be in a for-transformer
+	with 3
+        ^
+one error found
