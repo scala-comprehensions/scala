@@ -63,6 +63,8 @@ trait Trees extends scala.reflect.internal.Trees { self: Global =>
   /** emitted by typer, eliminated by refchecks */
   case class TypeTreeWithDeferredRefCheck()(val check: () => TypeTree) extends TypTree
 
+	case class With(body: Tree) extends TermTree
+
   // --- factory methods ----------------------------------------------------------
 
     /** Generates a template with constructor corresponding to
@@ -173,6 +175,8 @@ trait Trees extends scala.reflect.internal.Trees { self: Global =>
       traverser.traverse(qualifier)
     case InjectDerivedValue(arg) =>
       traverser.traverse(arg)
+		case With(body) =>
+			traverser.traverse(body)
     case TypeTreeWithDeferredRefCheck() =>
       // (and rewrap the result? how to update the deferred check? would need to store wrapped tree instead of returning it from check)
     case _ => super.xtraverse(traverser, tree)
@@ -249,6 +253,8 @@ trait Trees extends scala.reflect.internal.Trees { self: Global =>
         tree, transformer.transform(arg))
     case TypeTreeWithDeferredRefCheck() =>
       transformer.treeCopy.TypeTreeWithDeferredRefCheck(tree)
+		case With(body) =>
+			new With(body).copyAttrs(tree)
   }
 
   object resetPos extends Traverser {

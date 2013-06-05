@@ -328,7 +328,7 @@ trait Scanners extends ScannersCommon {
 //              println("blank line found at "+lastOffset+":"+(lastOffset to idx).map(buf(_)).toList)
               return true
             }
-	    if (idx == end) return false
+      if (idx == end) return false
           } while (ch <= ' ')
         }
         idx += 1; ch = buf(idx)
@@ -1184,7 +1184,8 @@ trait Scanners extends ScannersCommon {
     nme.HASHkw      -> HASH,
     nme.ATkw        -> AT,
     nme.MACROkw     -> IDENTIFIER,
-    nme.THENkw      -> IDENTIFIER)
+    nme.THENkw      -> (if (settings.XrichFor.value) THEN else IDENTIFIER)
+  )
 
   private var kwOffset: Int = -1
   private val kwArray: Array[Int] = {
