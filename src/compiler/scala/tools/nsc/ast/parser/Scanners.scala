@@ -1191,7 +1191,8 @@ trait Scanners extends ScannersCommon {
     nme.HASHkw      -> HASH,
     nme.ATkw        -> AT,
     nme.MACROkw     -> IDENTIFIER,
-    nme.THENkw      -> IDENTIFIER)
+    nme.THENkw      -> (if (settings.XrichFor) THEN else IDENTIFIER)
+  )
 
   private var kwOffset: Offset = -1
   private val kwArray: Array[Token] = {

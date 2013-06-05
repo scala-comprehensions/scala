@@ -658,7 +658,7 @@ self =>
     def isExprIntroToken(token: Token): Boolean = isLiteralToken(token) || (token match {
       case IDENTIFIER | BACKQUOTED_IDENT |
            THIS | SUPER | IF | FOR | NEW | USCORE | TRY | WHILE |
-           DO | RETURN | THROW | LPAREN | LBRACE | XMLSTART => true
+           DO | RETURN | THROW | LPAREN | LBRACE | XMLSTART | WITH => true
       case _ => false
     })
 
@@ -778,7 +778,7 @@ self =>
         syntaxError(
           offset, "left- and right-associative operators with same precedence may not be mixed", skipIt = false)
 
-    def reduceStack(isExpr: Boolean, base: List[OpInfo], top0: Tree, prec: Int, leftAssoc: Boolean): Tree = {
+    def reduceStack(isExpr: Boolean, base: List[OpInfo], top0: Tree, prec: Int, leftAssoc: Boolean, hasWith: Boolean): Tree = {
       var top = top0
       if (opstack != base && precedence(opstack.head.operator) == prec)
         checkAssoc(opstack.head.offset, opstack.head.operator, leftAssoc)
@@ -793,7 +793,8 @@ self =>
         val rPos = top.pos
         val end = if (rPos.isDefined) rPos.end else opPos.end
         top = atPos(start, opinfo.offset, end) {
-          makeBinop(isExpr, opinfo.operand, opinfo.operator.toTermName, top, opPos)
+          if (opstack == base) makeBinop(isExpr, opinfo.operand, opinfo.operator.toTermName, top, opPos, hasWith)
+          else makeBinop(isExpr, opinfo.operand, opinfo.operator.toTermName, top, opPos, false)
         }
       }
       top
@@ -1385,8 +1386,11 @@ self =>
         implicitClosure(in.skipToken(), location)
       case _ =>
         def parseOther = {
+          checkWith()
+          val hasWith = settings.XrichFor && in.token == WITH
+          if (hasWith) in.nextToken()
           var t = postfixExpr()
-          if (in.token == EQUALS) {
+          if (in.token == EQUALS && !hasWith) {
             t match {
               case Ident(_) | Select(_, _) | Apply(_, _) =>
                 t = atPos(t.pos.start, in.skipToken()) { gen.mkAssign(t, expr()) }
@@ -1421,8 +1425,10 @@ self =>
                 Typed(t, tpt)
               }
             }
+            if (hasWith) t = With(t)
           } else if (in.token == MATCH) {
             t = atPos(t.pos.start, in.skipToken())(Match(stripParens(t), inBracesOrNil(caseClauses())))
+            if (hasWith) t = With(t)
           }
           // in order to allow anonymous functions as statements (as opposed to expressions) inside
           // templates, we have to disambiguate them from self type declarations - bug #1565
@@ -1437,7 +1443,9 @@ self =>
               Function(convertToParams(t), if (location != InBlock) expr() else block())
             }
           }
-          stripParens(t)
+          t = stripParens(t)
+          if (hasWith) t = With(t)
+          t
         }
         parseOther
     }
@@ -1476,27 +1484,33 @@ self =>
       val start = in.offset
       val base  = opstack
       var top   = prefixExpr()
+      var hasWith = false
 
-      while (isIdent) {
-        top = reduceStack(isExpr = true, base, top, precedence(in.name), leftAssoc = treeInfo.isLeftAssoc(in.name))
+      while (isIdent && !hasWith) {
+        top = reduceStack(isExpr = true, base, top, precedence(in.name), leftAssoc = treeInfo.isLeftAssoc(in.name), hasWith = false)
         val op = in.name
         opstack = OpInfo(top, op, in.offset) :: opstack
         ident()
-        newLineOptWhenFollowing(isExprIntroToken)
-        if (isExprIntro) {
+        newLineOptWhenFollowing { t =>
+          (settings.XrichFor && t == WITH) || isExprIntroToken(t)
+        }
+        checkWith()
+        hasWith = settings.XrichFor && treeInfo.isLeftAssoc(op) && in.token == WITH
+        if (hasWith) in.nextToken()
+        if (isExprIntro || hasWith) {
           val next = prefixExpr()
           if (next == EmptyTree)
-            return reduceStack(isExpr = true, base, top, 0, leftAssoc = true)
+            return reduceStack(isExpr = true, base, top, 0, leftAssoc = true, hasWith = false)
           top = next
         } else {
           // postfix expression
           val topinfo = opstack.head
           opstack = opstack.tail
-          val od = stripParens(reduceStack(isExpr = true, base, topinfo.operand, 0, leftAssoc = true))
+          val od = stripParens(reduceStack(isExpr = true, base, topinfo.operand, 0, leftAssoc = true, hasWith = false))
           return makePostfixSelect(start, topinfo.offset, od, topinfo.operator)
         }
       }
-      reduceStack(isExpr = true, base, top, 0, leftAssoc = true)
+      reduceStack(isExpr = true, base, top, 0, leftAssoc = true, hasWith = hasWith)
     }
 
     /** {{{
@@ -1512,8 +1526,8 @@ self =>
           else
             Select(stripParens(simpleExpr()), name)
         }
-      }
-      else simpleExpr()
+      } else simpleExpr()
+
     }
     def xmlLiteral(): Tree
 
@@ -1667,26 +1681,57 @@ self =>
       if (in.token == IF) { in.nextToken(); stripParens(postfixExpr()) }
       else EmptyTree
 
+    def checkWith() {
+      if (settings.XrichFor && in.token == WITH && !parsingTransformer)
+        syntaxError(in.offset, "with must be in a for-transformer")
+    }
+
     /** {{{
      *  Enumerators ::= Generator {semi Enumerator}
      *  Enumerator  ::=  Generator
      *                |  Guard
      *                |  val Pattern1 `=' Expr
+     *                |  then Expr
      *  }}}
      */
     def enumerators(): List[Enumerator] = {
       val enums = new ListBuffer[Enumerator]
       generator(enums, eqOK = false)
+      enumerators1(enums)
+    }
+
+    def enumerators1(enums: ListBuffer[Enumerator]): List[Enumerator] = {
       while (isStatSep) {
         in.nextToken()
         if (in.token == IF) enums += makeFilter(in.offset, guard())
+        else if (settings.XrichFor && in.token == THEN)
+          forTransformer(enums, pattern = EmptyTree)
         else generator(enums, eqOK = true)
       }
       enums.toList
     }
 
+    var parsingTransformer = false
+    def forTransformer(enums: ListBuffer[Enumerator], pattern: Tree) {
+      val saved = parsingTransformer
+      val start = in.offset
+      val bodyName = freshTermName("forBody")
+      val op = try {
+        parsingTransformer = true
+        in.token = IDENTIFIER
+        in.name = bodyName
+        expr()
+      } finally {
+        parsingTransformer = saved
+      }
+      val rest =
+        if (isStatSep) enumerators1(ListBuffer.empty)
+        else Nil
+      enums prepend ForTransformer(o2p(start), pattern, bodyName, op, rest)
+    }
+
     /** {{{
-     *  Generator ::= Pattern1 (`<-' | `=') Expr [Guard]
+     *  Generator ::= Pattern1 ((`<-' [`then']) | `=') Expr [Guard]
      *  }}}
      */
     def generator(enums: ListBuffer[Enumerator], eqOK: Boolean) {
@@ -1706,11 +1751,19 @@ self =>
 
       if (hasEq && eqOK) in.nextToken()
       else accept(LARROW)
-      val rhs = expr()
-      enums += makeGenerator(r2p(start, point, in.lastOffset max start), pat, hasEq, rhs)
-      // why max above? IDE stress tests have shown that lastOffset could be less than start,
-      // I guess this happens if instead if a for-expression we sit on a closing paren.
-      while (in.token == IF) enums += makeFilter(in.offset, guard())
+
+      val hasTransformer = settings.XrichFor && in.token == THEN
+
+      if (hasTransformer && !hasEq && !hasVal) forTransformer(enums, pat)
+      else {
+        val rhs = expr()
+
+        enums += makeGenerator(r2p(start, point, in.lastOffset max start), pat, hasEq, rhs)
+        // why max above? IDE stress tests have shown that lastOffset could be less than start,
+        // I guess this happens if instead if a for-expression we sit on a closing paren.
+        while (in.token == IF) enums += makeFilter(in.offset, guard())
+      }
+
     }
 
     def makeFilter(start: Offset, tree: Tree) = Filter(r2p(start, tree.pos.point, tree.pos.end), tree)
@@ -1843,13 +1896,13 @@ self =>
         }
         val base = opstack
         while (isIdent && in.name != raw.BAR) {
-          top = reduceStack(isExpr = false, base, top, precedence(in.name), leftAssoc = treeInfo.isLeftAssoc(in.name))
+          top = reduceStack(isExpr = false, base, top, precedence(in.name), leftAssoc = treeInfo.isLeftAssoc(in.name), hasWith = false)
           val op = in.name
           opstack = OpInfo(top, op, in.offset) :: opstack
           ident()
           top = simplePattern(badPattern3)
         }
-        stripParens(reduceStack(isExpr = false, base, top, 0, leftAssoc = true))
+        stripParens(reduceStack(isExpr = false, base, top, 0, leftAssoc = true, hasWith = false))
       }
       def badPattern3(): Tree = {
         def isComma = in.token == COMMA
