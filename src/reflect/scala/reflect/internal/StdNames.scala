@@ -177,6 +177,7 @@ trait StdNames {
     final val SEALEDkw: TermName    = kw("sealed")
     final val SUPERkw: TermName     = kw("super")
     final val THENkw: TermName      = kw("then")
+    final val GROUPkw: TermName     = kw("group")
     final val THISkw: TermName      = kw("this")
     final val THROWkw: TermName     = kw("throw")
     final val TRAITkw: TermName     = kw("trait")
