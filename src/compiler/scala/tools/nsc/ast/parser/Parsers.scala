@@ -1718,7 +1718,7 @@ self =>
       while (isStatSep) {
         in.nextToken()
         if (in.token == IF) enums += makeFilter(in.offset, guard())
-        else if (settings.XrichFor && in.token == THEN)
+        else if (settings.XrichFor && (in.token == THEN || in.token == GROUP))
           forTransformer(enums, pattern = EmptyTree)
         else generator(enums, eqOK = true)
       }
@@ -1730,6 +1730,7 @@ self =>
       val saved = parsingTransformer
       val start = in.offset
       val bodyName = freshTermName("forBody")
+      val isGroup = in.token == GROUP
       val op = try {
         parsingTransformer = true
         in.token = IDENTIFIER
@@ -1741,7 +1742,7 @@ self =>
       val rest =
         if (isStatSep) enumerators1(ListBuffer.empty)
         else Nil
-      enums prepend ForTransformer(o2p(start), pattern, bodyName, op, rest)
+      enums prepend ForTransformer(o2p(start), isGroup, pattern, bodyName, op, rest)
     }
 
     /** {{{
@@ -1766,9 +1767,9 @@ self =>
       if (hasEq && eqOK) in.nextToken()
       else accept(LARROW)
 
-      val hasThen = settings.XrichFor && (in.token == THEN)
+      val hasTransformer = settings.XrichFor && (in.token == THEN || in.token == GROUP)
 
-      if (hasThen && !hasEq && !hasVal) forTransformer(enums, pat)
+      if (hasTransformer && !hasEq && !hasVal) forTransformer(enums, pat)
       else {
         val rhs = expr()
 

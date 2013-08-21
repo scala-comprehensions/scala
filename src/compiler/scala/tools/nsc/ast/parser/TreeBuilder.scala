@@ -272,6 +272,7 @@ abstract class TreeBuilder {
   case class Filter(pos: Position, test: Tree) extends Enumerator
   case class ForTransformer(
     pos: Position,
+    isGroup: Boolean,
     pattern: Tree,
     bodyName: Name,
     op: Tree,
@@ -401,7 +402,7 @@ abstract class TreeBuilder {
 
     def makeForTransformer(t: ForTransformer, before: List[Enumerator]): Tree = {
 
-      val ForTransformer(pos, pattern, bodyName, op, rest) = t
+      val ForTransformer(pos, isGroup, pattern, bodyName, op, rest) = t
 
       val beforePats = before collect {
         case ValEq(_, pat, _) => pat
@@ -410,7 +411,7 @@ abstract class TreeBuilder {
 
       val hasPattern = pattern != EmptyTree
       val alreadyBoundNames = (beforePats flatMap boundNames).distinct
-      val generatedBody = makeTupleTerm(alreadyBoundNames.map(Ident.apply), flattenUnary = true)
+      def generatedBody = makeTupleTerm(alreadyBoundNames.map(Ident.apply), flattenUnary = true)
       val innerFor = makeForYield(before, generatedBody)
       val extractingOp = new Transformer {
         override def transform(t: Tree) = t match {
@@ -420,6 +421,44 @@ abstract class TreeBuilder {
       }.transform(op)
 
       val opped = replaceWithBody(extractingOp, bodyName, innerFor)
+
+      val normalized = {
+        if (!isGroup) opped // no normalization is needed if not a group
+        else {
+
+          val elements = freshTermName()
+          val pattern = freshTermName()
+
+          val input =
+            if (hasPattern) makeTupleTerm(List(Ident(pattern), Ident(elements)), flattenUnary = false)
+            else Ident(elements)
+
+          val output =
+            if (hasPattern) makeTupleTerm(List(Ident(pattern), generatedBody), flattenUnary = false)
+            else generatedBody
+
+          val groupExtractors = alreadyBoundNames.map { name =>
+
+            val innerMapTree = Select(Ident(elements), newTermName("map"))
+            val innerPropName = freshTermName()
+            val mappedFunc = makeClosure(op.pos, patvarTransformer.transform(generatedBody), Ident(name))
+            val rhs = Apply(innerMapTree, List(mappedFunc))
+
+            ValDef(Modifiers(), name, TypeTree(), rhs)
+
+          }
+
+          val prefix = Select(opped, newTermName("map"))
+
+          val mappedFunc = makeClosure(
+            op.pos,
+            patvarTransformer.transform(input),
+            Block(groupExtractors, output)
+          )
+
+          Apply(prefix, List(mappedFunc))
+        }
+      }
 
 			val patternNames = boundNames(patvarTransformer.transform(pattern))
 
@@ -434,7 +473,7 @@ abstract class TreeBuilder {
         if (!hasPattern) generatedBody
         else makeTupleTerm(List(pattern, rebindings), flattenUnary = false)
 
-      val binding = ValFrom(op.pos, patvarTransformer.transform(lhs), opped)
+      val binding = ValFrom(op.pos, patvarTransformer.transform(lhs), normalized)
 
       val rest1 = rest match {
         case (t: ForTransformer) :: tail => t :: binding :: tail

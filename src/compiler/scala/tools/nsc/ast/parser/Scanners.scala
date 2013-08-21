@@ -202,7 +202,7 @@ trait Scanners extends ScannersCommon {
         val idx = name.start - kwOffset
         if (idx >= 0 && idx < kwArray.length) {
           token = kwArray(idx)
-          if (token == IDENTIFIER && allowIdent != name && emitIdentifierDeprecationWarnings)
+          if (token == IDENTIFIER && !(allowedIdents contains name) && emitIdentifierDeprecationWarnings)
             deprecationWarning(name+" is now a reserved word; usage as an identifier is deprecated")
         }
       }
@@ -249,16 +249,16 @@ trait Scanners extends ScannersCommon {
     }
 
     /** Allow an otherwise deprecated ident here */
-    private var allowIdent: Name = nme.EMPTY
+    private var allowedIdents: immutable.Set[Name] = immutable.ListSet(nme.GROUPkw)
 
     /** Get next token, and allow the otherwise deprecated ident `name`  */
     def nextTokenAllow(name: Name) = {
-      val prev = allowIdent
-      allowIdent = name
+      val prev = allowedIdents
+      allowedIdents = allowedIdents + name
       try {
         nextToken()
       } finally {
-        allowIdent = prev
+        allowedIdents = prev
       }
     }
 
@@ -1189,7 +1189,8 @@ trait Scanners extends ScannersCommon {
     nme.HASHkw      -> HASH,
     nme.ATkw        -> AT,
     nme.MACROkw     -> IDENTIFIER,
-    nme.THENkw      -> (if (settings.XrichFor) THEN else IDENTIFIER)
+    nme.THENkw      -> (if (settings.XrichFor) THEN else IDENTIFIER),
+    nme.GROUPkw     -> (if (settings.XrichFor) GROUP else IDENTIFIER)
   )
 
   private var kwOffset: Int = -1
